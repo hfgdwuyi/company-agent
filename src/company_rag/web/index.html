@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>企业知识库 · 文档查询</title>
+<style>
+  :root { --primary:#2563eb; --bg:#f5f7fa; --card:#fff; --border:#e5e7eb; --text:#1f2937; --muted:#6b7280; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif; background:var(--bg); color:var(--text); }
+  header { background:var(--primary); color:#fff; padding:16px 24px; display:flex; justify-content:space-between; align-items:center; }
+  header h1 { font-size:18px; font-weight:600; }
+  .container { max-width:1000px; margin:24px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:20px; margin-bottom:20px; }
+  .card h2 { font-size:15px; margin-bottom:14px; color:var(--primary); }
+  .row { display:flex; gap:10px; margin-bottom:10px; }
+  input[type=text] { flex:1; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; }
+  input[type=text]:focus { outline:2px solid var(--primary); border-color:transparent; }
+  button { padding:10px 20px; background:var(--primary); color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer; white-space:nowrap; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.secondary { background:#fff; color:var(--primary); border:1px solid var(--primary); }
+  .hint { color:var(--muted); font-size:12px; margin-top:6px; }
+  .hit { border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px; }
+  .hit .meta { color:var(--muted); font-size:12px; margin-bottom:6px; }
+  .hit .meta b { color:var(--primary); }
+  .hit pre { white-space:pre-wrap; word-break:break-word; font-family:inherit; font-size:13px; line-height:1.6; }
+  .answer { background:#f0f7ff; border-left:4px solid var(--primary); padding:14px; border-radius:6px; font-size:14px; line-height:1.8; white-space:pre-wrap; }
+  .sources { margin-top:10px; font-size:12px; color:var(--muted); }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .chip { background:#eef2ff; color:var(--primary); border:1px solid #c7d2fe; border-radius:20px; padding:4px 12px; font-size:12px; cursor:pointer; }
+  .empty { color:var(--muted); text-align:center; padding:20px 0; }
+  .loading { color:var(--primary); text-align:center; padding:10px; }
+  #keyInput { max-width:260px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:12px; }
+  footer { text-align:center; color:var(--muted); font-size:12px; padding:20px; }
+  .tabs { display:flex; gap:8px; margin-bottom:14px; }
+  .tab { padding:8px 16px; border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:13px; background:#fff; color:var(--muted); }
+  .tab.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+  .panel { display:none; }
+  .panel.active { display:block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📚 企业知识库 · 文档查询</h1>
+  <input type="text" id="keyInput" placeholder="API Key（未启用鉴权可留空）">
+</header>
+
+<div class="container">
+  <div class="card">
+    <h2>🔍 文档检索</h2>
+    <div class="row">
+      <input type="text" id="searchInput" placeholder="输入关键词或问题，检索知识库内容…" onkeydown="if(event.key==='Enter')doSearch()">
+      <button onclick="doSearch()" id="searchBtn">检索</button>
+    </div>
+    <div id="docChips" class="chips"></div>
+    <div id="searchResult"></div>
+  </div>
+
+  <div class="card">
+    <h2>💬 知识问答</h2>
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('rag')" id="tab-rag">RAG 问答</div>
+      <div class="tab" onclick="switchTab('agent')" id="tab-agent">Agent 对话</div>
+    </div>
+    <div class="panel active" id="panel-rag">
+      <div class="row">
+        <input type="text" id="ragInput" placeholder="基于知识库回答问题…" onkeydown="if(event.key==='Enter')doRag()">
+        <button onclick="doRag()" id="ragBtn">提问</button>
+      </div>
+      <div id="ragResult"></div>
+      <div class="hint">回答基于检索到的资料生成，并标注来源。</div>
+    </div>
+    <div class="panel" id="panel-agent">
+      <div class="row">
+        <input type="text" id="agentInput" placeholder="Agent 自动调用工具：知识检索/计算器/时间/文档清单…" onkeydown="if(event.key==='Enter')doAgent()">
+        <button onclick="doAgent()" id="agentBtn">发送</button>
+      </div>
+      <div id="agentResult"></div>
+      <div class="hint">Agent 可自动调用：retrieve_knowledge / calculator / get_current_datetime / list_documents / get_document_summary / count_documents。</div>
+    </div>
+  </div>
+</div>
+
+<footer>company-rag · 基于 TensorRT-LLM 本地推理 · 文档经向量化检索</footer>
+
+<script>
+const API = '/api/v1';
+
+function headers() {
+  const key = document.getElementById('keyInput').value.trim();
+  return key ? { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key } : { 'Content-Type': 'application/json' };
+}
+
+async function api(path, body) {
+  const r = await fetch(API + path, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+  if (!r.ok) { let msg = 'HTTP ' + r.status; try { msg = (await r.json()).detail || msg; } catch(e){} throw new Error(msg); }
+  return r.json();
+}
+
+function esc(s) { return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function imgsHtml(urls) {
+  if (!urls || !urls.length) return '';
+  return '<div style="margin:8px 0">' + urls.map(u =>
+    '<img src="' + esc(u) + '" style="max-width:100%;max-height:320px;border:1px solid var(--border);border-radius:8px;margin-right:8px" loading="lazy" onerror="this.style.display=\'none\'">'
+  ).join('') + '</div>';
+}
+
+async function loadDocs() {
+  try {
+    const key = document.getElementById('keyInput').value.trim();
+    const opts = key ? { headers: { 'Authorization': 'Bearer ' + key } } : {};
+    const r = await fetch(API + '/documents', opts);
+    if (!r.ok) return;
+    const docs = await r.json();
+    const box = document.getElementById('docChips');
+    box.innerHTML = docs.length ? '<span class="hint">点击文档名可限定检索范围：</span>' : '';
+    docs.forEach(d => {
+      const c = document.createElement('span');
+      c.className = 'chip';
+      c.textContent = d.filename + '（' + d.chunk_count + '）';
+      c.onclick = () => { document.getElementById('searchInput').value = d.filename.split('.')[0]; doSearch(); };
+      box.appendChild(c);
+    });
+  } catch(e) {}
+}
+
+async function doSearch() {
+  const q = document.getElementById('searchInput').value.trim();
+  const box = document.getElementById('searchResult');
+  if (!q) return;
+  box.innerHTML = '<div class="loading">检索中…</div>';
+  document.getElementById('searchBtn').disabled = true;
+  try {
+    const res = await api('/search', { query: q, top_k: 10, min_score: 0.3 });
+    if (!res.hits.length) { box.innerHTML = '<div class="empty">未检索到相关内容，换个关键词试试。</div>'; return; }
+    box.innerHTML = '<div class="hint">命中 ' + res.total + ' 个片段：</div>' + res.hits.map(h =>
+      '<div class="hit"><div class="meta"><b>' + esc(h.filename) + '</b> · 第' + (h.page||'-') + '页 · 相似度 ' + h.score.toFixed(3) + '</div>' +
+      imgsHtml(h.images) + '<pre>' + esc(h.text) + '</pre></div>'
+    ).join('');
+  } catch(e) { box.innerHTML = '<div class="empty">检索失败：' + esc(e.message) + '</div>'; }
+  document.getElementById('searchBtn').disabled = false;
+}
+
+async function doRag() {
+  const q = document.getElementById('ragInput').value.trim();
+  const box = document.getElementById('ragResult');
+  if (!q) return;
+  box.innerHTML = '<div class="loading">正在检索并生成回答…（约 10-30 秒）</div>';
+  document.getElementById('ragBtn').disabled = true;
+  try {
+    const res = await api('/query', { question: q, top_k: 3 });
+    const src = res.sources.map(s => esc(s.filename) + ' 第' + (s.page||'-') + '页').join('；');
+    const trunc = res.truncated ? '<div class="hint" style="color:#dc2626">⚠️ 回答因硬件输出长度限制被截断，可换个更具体的问题。</div>' : '';
+    const imgs = res.sources.map(s => imgsHtml(s.images)).join('');
+    box.innerHTML = '<div class="answer">' + esc(res.answer) + '</div>' + trunc + imgs +
+      (res.sources.length ? '<div class="sources">📎 来源：' + src + '</div>' : '');
+  } catch(e) { box.innerHTML = '<div class="empty">请求失败：' + esc(e.message) + '</div>'; }
+  document.getElementById('ragBtn').disabled = false;
+}
+
+async function doAgent() {
+  const q = document.getElementById('agentInput').value.trim();
+  const box = document.getElementById('agentResult');
+  if (!q) return;
+  box.innerHTML = '<div class="loading">Agent 思考中…（可能调用工具，约 10-40 秒）</div>';
+  document.getElementById('agentBtn').disabled = true;
+  try {
+    const res = await api('/chat', { message: q });
+    const tools = res.tool_invocations.map(t => '🔧 ' + esc(t.name) + '(' + esc(JSON.stringify(t.arguments)) + ') ' + (t.ok ? '✅' : '❌')).join('<br>');
+    box.innerHTML = (tools ? '<div class="sources">' + tools + '</div>' : '') + '<div class="answer">' + esc(res.answer) + '</div>';
+  } catch(e) { box.innerHTML = '<div class="empty">请求失败：' + esc(e.message) + '</div>'; }
+  document.getElementById('agentBtn').disabled = false;
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+loadDocs();
+</script>
+</body>
+</html>
+
+

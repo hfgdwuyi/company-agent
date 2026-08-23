@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+
+# 数据（向量库/原始文档/模型可重建；语料由 scripts/download_corpus.py 在目标机器下载）
+data/chroma/
+data/parsed/
+data/images/
+data/raw/
+models/
+*.tar
+
+# 测试产物
+results/
+last_failed_payload.json
+
+# IDE
+.idea/
+.vscode/
+
+# 本地环境
+.env
+*.local

@@ -1,0 +1,47 @@
+# docker-compose.yml — company-rag 服务（企业知识库 + Agent）
+#
+# 用法（宿主机 PowerShell）：
+#   docker compose -f deploy\docker-compose.yml up -d --build
+#   服务地址: http://127.0.0.1:8010  (Swagger: /docs)
+#
+# 说明：
+#   - 依赖已运行的 TensorRT-LLM 容器（trt-llm-qwen，宿主 127.0.0.1:8001），
+#     通过 host.docker.internal 访问。
+#   - 嵌入模型挂载自宿主 C:\AI\company-rag\models（ModelScope 下载的 bge-small-zh-v1.5）。
+#   - 向量库数据持久化在宿主 C:\AI\company-rag\data\chroma。
+
+services:
+  rag-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: company-rag
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    environment:
+      RAG_LLM_BASE_URL: "http://host.docker.internal:8001/v1"
+      RAG_LLM_MODEL: "engine_qwen_int4_v2"
+      RAG_DATA_DIR: "/data"
+      RAG_EMBED_MODEL_PATH: "/models/BAAI/bge-small-zh-v1.5"
+      RAG_EMBED_DEVICE: "cpu"
+      RAG_CHROMA_DIR: "/data/chroma"
+      RAG_RAW_DIR: "/data/raw"
+      RAG_PARSED_DIR: "/data/parsed"
+      RAG_API_KEY: ""            # 对外暴露时请设置，如 "rag-<random>"
+      RAG_CHUNK_SIZE: "220"
+      RAG_CHUNK_OVERLAP: "50"
+      RAG_TOP_K: "3"
+    volumes:
+      - C:\AI\company-rag\models:/models
+      - C:\AI\company-rag\data:/data
+      # 代码热挂载：宿主 src\company_rag 直接覆盖容器内包目录，
+      # 改网页(web\index.html)刷新即生效；改 Python 代码后 docker compose restart 即可（几秒，无需重建镜像）
+      - C:\AI\company-rag\src\company_rag:/usr/local/lib/python3.12/site-packages/company_rag
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
