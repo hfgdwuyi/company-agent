@@ -1,4 +1,4 @@
-# docker-compose.yml — company-rag 服务（企业知识库 + Agent）
+﻿# docker-compose.yml — company-rag 服务（企业知识库 + Agent）
 #
 # 用法（宿主机 PowerShell）：
 #   docker compose -f deploy\docker-compose.yml up -d --build
@@ -20,8 +20,8 @@ services:
     ports:
       - "8010:8010"
     environment:
-      RAG_LLM_BASE_URL: "http://host.docker.internal:8001/v1"
-      RAG_LLM_MODEL: "engine_qwen_int4_v2"
+      RAG_LLM_BASE_URL: "http://host.docker.internal:8002/v1"
+      RAG_LLM_MODEL: "engine_mech_int8"
       RAG_DATA_DIR: "/data"
       RAG_EMBED_MODEL_PATH: "/models/BAAI/bge-small-zh-v1.5"
       RAG_EMBED_DEVICE: "cpu"
@@ -45,3 +45,4 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
+

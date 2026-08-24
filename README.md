@@ -254,6 +254,48 @@ docker compose -f deploy\docker-compose.yml up -d    # 或: uvicorn company_rag.
 
 > 引擎/模型/语料均可重建，仓库保持轻量（约 500KB 纯代码）。
 
+## 机械维修领域 LoRA 微调（工业标准回答格式）
+
+目标：让 RAG 对机械维修问题的回答符合工业标准（**问题现象 → 分析原因 → 解决方案**），提升可靠性与标准性。
+
+### 数据（data/finetune/，可重建）
+
+- `mech_repair_sft.jsonl`：**866 条 SFT 数据**（instruction/input/output），来源：
+  - HF Automotive_Industry_Fault_Data_Set（1441 条真实维修文本：故障现象/原因/处理方法）→ 规则切分出三段齐全样本
+  - 其余用本地 TRT-LLM 合成补全为标准三段格式（`scripts/prepare_finetune_data.py`）
+- `guides/`：真实操作规程（《生产设备安全操作规程》团标 PDF）
+
+### 微调与部署
+
+```powershell
+# 1. 准备数据（规则切分 + LLM 合成补全）
+python scripts/prepare_finetune_data.py --synth
+
+# 2. QLoRA 微调（8GB 卡：7B 会 OOM，用 3B；需先停 TRT-LLM 释放显存）
+python scripts/train_lora.py --epochs 3 --rank 16 --max-seq-len 512
+# → data/lora/mech-repair-lora（adapter 约 119MB）
+
+# 3. 合并 LoRA → 全量 fp16（注意：4bit 基座上 merge 会残留量化权重，
+#    必须用 CPU fp16 加载再合并，见 scripts/merge_lora.py）
+python scripts/merge_lora.py
+
+# 4. 构建 TRT-LLM 引擎（实测：TRT-LLM 0.21 对 Qwen2.5-3B int4 量化输出乱码，
+#    必须用 int8 量化；fp16 构建会显存不足）
+#    convert_checkpoint.py --weight_only_precision int8 → trtllm-build → trtllm-serve :8002
+
+# 5. RAG 服务指向微调引擎
+#    deploy/docker-compose.yml: RAG_LLM_BASE_URL=http://host.docker.internal:8002/v1
+#                               RAG_LLM_MODEL=engine_mech_int8
+```
+
+### 效果
+
+- 维修语料（866 案例 + 操作规程）已入库知识库，机械问题检索命中 ~0.72；
+- 微调引擎（3B int8）输出标准三段格式，`truncated=False`（3B 引擎 KV 预算大幅提升，回答不再被截断）；
+- 评估：`scripts/eval_lora_vs_base.py`（带格式 prompt 对比）、`scripts/eval_lora_noprompt.py`（无提示词对比）、`scripts/test_lora.py`（单问题验证）。
+
+> 已知限制：TRT-LLM 0.21 对 Qwen2.5-3B int4 量化乱码（int8 绕过）；8GB 卡 7B QLoRA 训练峰值 9.1GB 会 OOM（改用 3B）；LoRA 学到的是"跟随格式指令"而非无条件自发格式化（RAG 场景带 SYSTEM_PROMPT 不受影响）。
+
 ## 性能评估
 
 内置两套评估脚本（真实 TRT-LLM + 已入库语料）：

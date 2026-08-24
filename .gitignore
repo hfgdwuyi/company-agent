@@ -9,6 +9,9 @@ data/chroma/
 data/parsed/
 data/images/
 data/raw/
+data/finetune/
+data/fault_dataset/
+data/lora/
 models/
 *.tar
 
